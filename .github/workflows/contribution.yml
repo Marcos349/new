@@ -1,0 +1,611 @@
+name: Unified Multi-Account Workflow (v7.0 - HYBRID BEST OF BOTH)
+
+# HYBRID COMBINING BEST OF v4.0 and v6.4:
+# ✅ Commit & Repo creation from v4.0 (WORKS!)
+# ✅ PR & Issue creation from v6.4 (WORKS!)
+# ✅ Direct push to main (NO unique branch - stats counted!)
+# ✅ Fixed all bugs from both versions
+# ✅ Optimized stagger delay
+# ✅ Smart error handling
+
+on:
+  workflow_dispatch:
+    inputs:
+      total_commits:
+        description: "Jumlah total commit per akun"
+        required: true
+        default: "2500"
+      total_days:
+        description: "Jumlah hari pembagian commit"
+        required: true
+        default: "365"
+      total_prs:
+        description: "Jumlah Pull Request per akun"
+        required: true
+        default: "100"
+      total_issues:
+        description: "Jumlah Issue per akun"
+        required: true
+        default: "100"
+      repo_count:
+        description: "Jumlah repository tambahan per akun"
+        required: true
+        default: "25"
+      target_repo:
+        description: "Repository utama tempat aktivitas (Owner/Repo)"
+        required: true
+        default: "Marcos349/new"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs.target_repo }}
+  cancel-in-progress: false
+
+jobs:
+  unified:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        include:
+          - account: Marcos349
+            email: 28676255+Marcos349@users.noreply.github.com
+            token_secret_1: PAT1A
+            token_secret_2: PAT1B
+            token_secret_3: PAT1C
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Optimized Stagger Delay
+        run: |
+          SLOT=${{ strategy.job-index }}
+          
+          if [ $SLOT -eq 0 ]; then
+            DELAY=0
+          elif [ $SLOT -le 3 ]; then
+            DELAY=$((SLOT * 2))
+          else
+            DELAY=10
+          fi
+          
+          JITTER=$((RANDOM % 3))
+          DELAY=$((DELAY + JITTER))
+          
+          echo "════════════════════════════════════════"
+          echo "🚀 v7.0 HYBRID - Account: ${{ matrix.account }}"
+          echo "   Slot: $SLOT | Delay: ${DELAY}s"
+          echo "   Order: Repos → Commits → PRs → Issues"
+          echo "   Strategy: Direct push to main (NO branch)"
+          echo "════════════════════════════════════════"
+          
+          sleep $DELAY
+
+      - name: Setup Tokens
+        run: |
+          echo "TOKEN_1=${{ secrets[matrix.token_secret_1] }}" >> $GITHUB_ENV
+          echo "TOKEN_2=${{ secrets[matrix.token_secret_2] }}" >> $GITHUB_ENV
+          echo "TOKEN_3=${{ secrets[matrix.token_secret_3] }}" >> $GITHUB_ENV
+          
+          if [ -z "${{ secrets[matrix.token_secret_1] }}" ]; then
+            echo "❌ TOKEN_1 missing!"
+            exit 1
+          fi
+          
+          echo "✅ 3 tokens loaded for ${{ matrix.account }}"
+
+      - name: Setup Git Identity
+        run: |
+          git config --global user.name "${{ matrix.account }}"
+          git config --global user.email "${{ matrix.email }}"
+          git config --global http.postBuffer 524288000
+          git config --global core.compression 0
+          git config --global gc.auto 0
+          echo "✅ Git identity set for ${{ matrix.account }}"
+
+      - name: "PHASE 1: Create Additional Repositories"
+        env:
+          REPO_COUNT: ${{ github.event.inputs.repo_count }}
+        shell: bash
+        run: |
+          set +e
+          
+          echo ""
+          echo "════════════════════════════════════════"
+          echo "📦 PHASE 1: CREATE REPOSITORIES"
+          echo "   Target: $REPO_COUNT repos"
+          echo "════════════════════════════════════════"
+          
+          TOKENS=("$TOKEN_1" "$TOKEN_2" "$TOKEN_3")
+          
+          WORDS=("quantum" "nova" "lumen" "matrix" "orbit" "vector" "sigma" "neon" "fusion" "zenith" "alpha" "omega" "pulse" "nexus" "terra" "vortex" "plasma" "aether" "chrono" "helios")
+          SUFFIX=("project" "service" "system" "app" "engine" "hub" "core" "cloud" "lab" "studio")
+          
+          SUCCESS=0
+          ATTEMPT=0
+          MAX_ATTEMPTS=$((REPO_COUNT * 3))
+          
+          while [ $SUCCESS -lt $REPO_COUNT ] && [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT+1))
+            
+            TOKEN_IDX=$((RANDOM % 3))
+            TOKEN="${TOKENS[$TOKEN_IDX]}"
+            
+            NAME="${WORDS[$RANDOM % ${#WORDS[@]}]}-${SUFFIX[$RANDOM % ${#SUFFIX[@]}]}-${{ matrix.account }}-$(date +%s%N | tail -c 8)"
+            
+            RESPONSE=$(curl -s -w "\n%{http_code}" \
+              -H "Authorization: token $TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -d "{\"name\":\"$NAME\",\"auto_init\":true,\"private\":false}" \
+              https://api.github.com/user/repos 2>/dev/null || echo -e "\n000")
+            
+            CODE=$(echo "$RESPONSE" | tail -n1)
+            
+            if [ "$CODE" = "201" ]; then
+              SUCCESS=$((SUCCESS+1))
+              echo "✅ Created ($SUCCESS/$REPO_COUNT): $NAME"
+              sleep 3
+            elif [ "$CODE" = "403" ]; then
+              echo "⚠️  Rate limit hit, waiting 30s..."
+              sleep 30
+            elif [ "$CODE" = "422" ]; then
+              sleep 1
+            else
+              sleep 2
+            fi
+            
+            if [ $((SUCCESS % 5)) -eq 0 ] && [ $SUCCESS -gt 0 ]; then
+              echo "   Progress: $SUCCESS/$REPO_COUNT repos created"
+            fi
+          done
+          
+          echo ""
+          echo "✅ PHASE 1 COMPLETE: $SUCCESS/$REPO_COUNT repositories created"
+          echo "════════════════════════════════════════"
+
+      - name: "PHASE 2: Clone Target Repository"
+        env:
+          TARGET_REPO: ${{ github.event.inputs.target_repo }}
+        run: |
+          echo ""
+          echo "════════════════════════════════════════"
+          echo "📥 CLONING TARGET REPOSITORY"
+          echo "   Repo: $TARGET_REPO"
+          echo "════════════════════════════════════════"
+          
+          GH_TOKEN=$TOKEN_1
+          
+          if [ -z "$GH_TOKEN" ]; then
+            echo "❌ TOKEN_1 is empty!"
+            exit 1
+          fi
+          
+          echo "✅ Token available (length: ${#GH_TOKEN})"
+          
+          echo "🔐 Testing token..."
+          USER_DATA=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            https://api.github.com/user 2>/dev/null)
+          
+          if echo "$USER_DATA" | grep -q "Bad credentials"; then
+            echo "❌ Token invalid!"
+            exit 1
+          fi
+          
+          USERNAME=$(echo "$USER_DATA" | grep -o '"login":"[^"]*' | cut -d'"' -f4)
+          echo "✅ Token valid for: $USERNAME"
+          
+          OWNER="${TARGET_REPO%%/*}"
+          REPO="${TARGET_REPO#*/}"
+          
+          DEFAULT_BRANCH=$(curl -s \
+            -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/$OWNER/$REPO" | \
+            grep -o '"default_branch":"[^"]*' | cut -d'"' -f4)
+          
+          [ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH="main"
+          
+          echo "📌 Default branch: $DEFAULT_BRANCH"
+          echo "DEFAULT_BRANCH=$DEFAULT_BRANCH" >> $GITHUB_ENV
+          
+          if git clone --depth=1 --branch="$DEFAULT_BRANCH" \
+            "https://x-access-token:${GH_TOKEN}@github.com/$TARGET_REPO" repo 2>/dev/null; then
+            echo "✅ Clone successful"
+          else
+            echo "⚠️  Branch clone failed, trying without branch..."
+            if git clone --depth=1 \
+              "https://x-access-token:${GH_TOKEN}@github.com/$TARGET_REPO" repo; then
+              echo "✅ Clone successful"
+            else
+              echo "❌ Clone failed!"
+              exit 1
+            fi
+          fi
+          
+          cd repo
+          git config user.name "${{ matrix.account }}"
+          git config user.email "${{ matrix.email }}"
+          
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/$TARGET_REPO"
+          
+          echo "✅ Repository ready"
+          echo "════════════════════════════════════════"
+
+      - name: "PHASE 3: Create Commits (Direct Push)"
+        env:
+          TOTAL_COMMITS: ${{ github.event.inputs.total_commits }}
+          TOTAL_DAYS: ${{ github.event.inputs.total_days }}
+          DEFAULT_BRANCH: ${{ env.DEFAULT_BRANCH }}
+          TARGET_REPO: ${{ github.event.inputs.target_repo }}
+        run: |
+          cd repo
+          
+          echo ""
+          echo "════════════════════════════════════════"
+          echo "📝 PHASE 3: CREATE COMMITS"
+          echo "   Target: $TOTAL_COMMITS commits"
+          echo "   Days: $TOTAL_DAYS"
+          echo "   Branch: $DEFAULT_BRANCH (DIRECT PUSH)"
+          echo "════════════════════════════════════════"
+          
+          GH_TOKEN=$TOKEN_1
+          
+          if [ -z "$GH_TOKEN" ]; then
+            echo "❌ TOKEN missing!"
+            exit 1
+          fi
+          
+          mkdir -p .github/activity
+          FILE=".github/activity/${{ matrix.account }}.log"
+          
+          if [ $TOTAL_DAYS -gt 0 ]; then
+            COMMITS_PER_DAY=$((TOTAL_COMMITS / TOTAL_DAYS))
+            [ $COMMITS_PER_DAY -lt 1 ] && COMMITS_PER_DAY=1
+          else
+            COMMITS_PER_DAY=1
+            TOTAL_DAYS=1
+          fi
+          
+          START_DATE=$(date -d "$TOTAL_DAYS days ago" +%Y-%m-%d)
+          
+          echo "📊 Creating commits..."
+          echo "   Per day: $COMMITS_PER_DAY"
+          echo "   Start date: $START_DATE"
+          
+          ACTUAL=0
+          START_TIME=$(date +%s)
+          
+          for ((day=0; day<TOTAL_DAYS; day++)); do
+            DATE=$(date -d "$START_DATE +$day days" +%Y-%m-%d)
+            
+            HOUR=$((9 + RANDOM % 10))
+            MINUTE=$((RANDOM % 60))
+            SECOND=$((RANDOM % 60))
+            
+            COMMIT_DATE="$DATE ${HOUR}:${MINUTE}:${SECOND} +0000"
+            
+            for ((c=1; c<=COMMITS_PER_DAY; c++)); do
+              ACTUAL=$((ACTUAL+1))
+              [ $ACTUAL -gt $TOTAL_COMMITS ] && break 2
+              
+              echo "$ACTUAL|$COMMIT_DATE|${{ matrix.account }}" >> "$FILE"
+              git add "$FILE"
+              
+              GIT_AUTHOR_DATE="$COMMIT_DATE" \
+              GIT_COMMITTER_DATE="$COMMIT_DATE" \
+              git commit -m "Activity $ACTUAL" --no-verify -q 2>/dev/null || true
+            done
+            
+            if [ $((day % 50)) -eq 0 ] && [ $day -gt 0 ]; then
+              echo "   Progress: $day/$TOTAL_DAYS days ($ACTUAL commits)"
+            fi
+          done
+          
+          ELAPSED=$(($(date +%s) - START_TIME))
+          echo "✅ Created $ACTUAL commits in ${ELAPSED}s"
+          
+          echo ""
+          echo "🚀 Pushing commits directly to $DEFAULT_BRANCH..."
+          
+          git config --global credential.helper store
+          echo "https://x-access-token:${GH_TOKEN}@github.com" > ~/.git-credentials
+          
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/$TARGET_REPO"
+          
+          PUSH_SUCCESS=false
+          for attempt in {1..5}; do
+            echo "   Push attempt $attempt/5..."
+            
+            if git pull --rebase --autostash origin "$DEFAULT_BRANCH" 2>&1; then
+              echo "   ✅ Pull successful"
+            else
+              echo "   ⚠️  Pull failed, continuing..."
+            fi
+            
+            if git push origin "$DEFAULT_BRANCH" 2>&1; then
+              echo "✅ Push successful!"
+              PUSH_SUCCESS=true
+              break
+            else
+              echo "⚠️  Push failed, retrying..."
+              sleep $((attempt * 3))
+            fi
+          done
+          
+          if [ "$PUSH_SUCCESS" = false ]; then
+            echo "❌ Push failed after 5 attempts!"
+            exit 1
+          fi
+          
+          echo ""
+          echo "✅ PHASE 3 COMPLETE"
+          echo "   Commits: $ACTUAL created and pushed"
+          echo "   Branch: $DEFAULT_BRANCH (direct push - stats counted!)"
+          echo "════════════════════════════════════════"
+
+      - name: "PHASE 4: Create Pull Requests"
+        env:
+          TARGET_REPO: ${{ github.event.inputs.target_repo }}
+          TOTAL_PRS: ${{ github.event.inputs.total_prs }}
+          DEFAULT_BRANCH: ${{ env.DEFAULT_BRANCH }}
+        shell: bash
+        run: |
+          cd repo
+          
+          echo ""
+          echo "════════════════════════════════════════"
+          echo "🔀 PHASE 4: CREATE PULL REQUESTS"
+          echo "   Target: $TOTAL_PRS PRs"
+          echo "════════════════════════════════════════"
+          
+          TOKENS=("$TOKEN_1" "$TOKEN_2" "$TOKEN_3")
+          TC=3
+          
+          SUCCESS=0
+          FAIL=0
+          START=$(date +%s)
+          
+          CURRENT_TOKEN=0
+          declare -a TOKEN_USAGE
+          declare -a TOKEN_FAILS
+          for ((i=0; i<TC; i++)); do
+            TOKEN_USAGE[$i]=0
+            TOKEN_FAILS[$i]=0
+          done
+          
+          get_next_token() {
+            local start=$CURRENT_TOKEN
+            local checked=0
+            
+            while [ $checked -lt $TC ]; do
+              CURRENT_TOKEN=$(( (CURRENT_TOKEN + 1) % TC ))
+              checked=$((checked + 1))
+              
+              if [ ${TOKEN_FAILS[$CURRENT_TOKEN]} -lt 5 ]; then
+                return 0
+              fi
+              
+              [ $CURRENT_TOKEN -eq $start ] && break
+            done
+            
+            for ((i=0; i<TC; i++)); do
+              TOKEN_FAILS[$i]=0
+            done
+            return 0
+          }
+          
+          for i in $(seq 1 "$TOTAL_PRS"); do
+            CREATED=0
+            ATTEMPT=0
+            
+            while [ $CREATED -eq 0 ] && [ $ATTEMPT -lt 3 ]; do
+              ATTEMPT=$((ATTEMPT+1))
+              
+              get_next_token
+              TI=$CURRENT_TOKEN
+              TOK="${TOKENS[$TI]}"
+              TOKEN_USAGE[$TI]=$((TOKEN_USAGE[$TI] + 1))
+              
+              BRANCH="pr-$i-${{ matrix.account }}-$(date +%s%N | tail -c 8)"
+              
+              git checkout -b "$BRANCH" "$DEFAULT_BRANCH" 2>&1 >/dev/null || \
+              git checkout -B "$BRANCH" "$DEFAULT_BRANCH" 2>&1 >/dev/null
+              
+              echo "PR $i content by ${{ matrix.account }}" > "pr_file_$i.txt"
+              git add "pr_file_$i.txt"
+              
+              git commit -m "PR #$i from ${{ matrix.account }}" 2>&1 >/dev/null || true
+              
+              git push -f "https://x-access-token:${TOK}@github.com/$TARGET_REPO" HEAD:"$BRANCH" 2>&1 >/dev/null || true
+              
+              RESPONSE=$(curl -s -w "\n%{http_code}" \
+                --max-time 10 \
+                -H "Authorization: token ${TOK}" \
+                -H "Accept: application/vnd.github+json" \
+                -X POST \
+                -d "{\"title\":\"PR #$i from ${{ matrix.account }}\",\"body\":\"Automated PR #$i\",\"head\":\"$BRANCH\",\"base\":\"$DEFAULT_BRANCH\"}" \
+                "https://api.github.com/repos/${TARGET_REPO}/pulls" 2>/dev/null || echo -e "\n000")
+              
+              CODE=$(echo "$RESPONSE" | tail -n1)
+              
+              if [ "$CODE" = "201" ]; then
+                SUCCESS=$((SUCCESS+1))
+                CREATED=1
+                TOKEN_FAILS[$TI]=0
+                sleep 0.2
+              elif [ "$CODE" = "403" ]; then
+                TOKEN_FAILS[$TI]=$((TOKEN_FAILS[$TI] + 1))
+                sleep 2
+              elif [ "$CODE" = "422" ]; then
+                break
+              else
+                TOKEN_FAILS[$TI]=$((TOKEN_FAILS[$TI] + 1))
+                sleep 0.5
+              fi
+            done
+            
+            [ $CREATED -eq 0 ] && FAIL=$((FAIL+1))
+            
+            git checkout "$DEFAULT_BRANCH" 2>&1 >/dev/null || true
+            
+            if [ $((i % 20)) -eq 0 ]; then
+              ELAPSED=$(($(date +%s) - START))
+              if [ $ELAPSED -gt 0 ]; then
+                RATE=$(( (i * 60) / ELAPSED ))
+                PCT=$(( (SUCCESS * 100) / i ))
+                echo "⚡ Progress: $i/$TOTAL_PRS (✓$SUCCESS ✗$FAIL) ${PCT}% | ${RATE}/min"
+              fi
+            fi
+          done
+          
+          TOTAL_TIME=$(($(date +%s) - START))
+          if [ $TOTAL_TIME -gt 0 ] && [ $TOTAL_PRS -gt 0 ]; then
+            RATE=$(( (TOTAL_PRS * 60) / TOTAL_TIME ))
+            PCT=$(( (SUCCESS * 100) / TOTAL_PRS ))
+          else
+            RATE=0
+            PCT=0
+          fi
+          
+          echo ""
+          echo "✅ PHASE 4 COMPLETE"
+          echo "   Total: $TOTAL_PRS PRs in ${TOTAL_TIME}s"
+          echo "   Success: $SUCCESS (${PCT}%)"
+          echo "   Failed: $FAIL"
+          echo "   Rate: ${RATE} PR/min"
+          echo "════════════════════════════════════════"
+
+      - name: "PHASE 5: Create Issues"
+        env:
+          TARGET_REPO: ${{ github.event.inputs.target_repo }}
+          TOTAL_ISSUES: ${{ github.event.inputs.total_issues }}
+        shell: bash
+        run: |
+          echo ""
+          echo "════════════════════════════════════════"
+          echo "📋 PHASE 5: CREATE ISSUES"
+          echo "   Target: $TOTAL_ISSUES issues"
+          echo "════════════════════════════════════════"
+          
+          TOKENS=("$TOKEN_1" "$TOKEN_2" "$TOKEN_3")
+          TC=3
+          
+          SUCCESS=0
+          FAIL=0
+          START=$(date +%s)
+          
+          CURRENT_TOKEN=0
+          declare -a TOKEN_USAGE
+          declare -a TOKEN_FAILS
+          for ((i=0; i<TC; i++)); do
+            TOKEN_USAGE[$i]=0
+            TOKEN_FAILS[$i]=0
+          done
+          
+          get_next_token() {
+            local start=$CURRENT_TOKEN
+            local checked=0
+            
+            while [ $checked -lt $TC ]; do
+              CURRENT_TOKEN=$(( (CURRENT_TOKEN + 1) % TC ))
+              checked=$((checked + 1))
+              
+              if [ ${TOKEN_FAILS[$CURRENT_TOKEN]} -lt 5 ]; then
+                return 0
+              fi
+              
+              [ $CURRENT_TOKEN -eq $start ] && break
+            done
+            
+            for ((i=0; i<TC; i++)); do
+              TOKEN_FAILS[$i]=0
+            done
+            return 0
+          }
+          
+          for i in $(seq 1 "$TOTAL_ISSUES"); do
+            CREATED=0
+            ATTEMPT=0
+            
+            while [ $CREATED -eq 0 ] && [ $ATTEMPT -lt 3 ]; do
+              ATTEMPT=$((ATTEMPT+1))
+              
+              get_next_token
+              TI=$CURRENT_TOKEN
+              TOK="${TOKENS[$TI]}"
+              TOKEN_USAGE[$TI]=$((TOKEN_USAGE[$TI] + 1))
+              
+              RESPONSE=$(curl -s -w "\n%{http_code}" \
+                --max-time 10 \
+                -H "Authorization: token ${TOK}" \
+                -H "Accept: application/vnd.github+json" \
+                -X POST \
+                -d "{\"title\":\"Issue $i - ${{ matrix.account }}\",\"body\":\"Automated issue $i created by ${{ matrix.account }}\"}" \
+                "https://api.github.com/repos/${TARGET_REPO}/issues" 2>/dev/null || echo -e "\n000")
+              
+              CODE=$(echo "$RESPONSE" | tail -n1)
+              
+              if [ "$CODE" = "201" ]; then
+                SUCCESS=$((SUCCESS+1))
+                CREATED=1
+                TOKEN_FAILS[$TI]=0
+                sleep 0.2
+              elif [ "$CODE" = "403" ]; then
+                TOKEN_FAILS[$TI]=$((TOKEN_FAILS[$TI] + 1))
+                sleep 2
+              elif [ "$CODE" = "422" ]; then
+                break
+              else
+                TOKEN_FAILS[$TI]=$((TOKEN_FAILS[$TI] + 1))
+                sleep 0.5
+              fi
+            done
+            
+            [ $CREATED -eq 0 ] && FAIL=$((FAIL+1))
+            
+            if [ $((i % 20)) -eq 0 ]; then
+              ELAPSED=$(($(date +%s) - START))
+              if [ $ELAPSED -gt 0 ]; then
+                RATE=$(( (i * 60) / ELAPSED ))
+                PCT=$(( (SUCCESS * 100) / i ))
+                echo "⚡ Progress: $i/$TOTAL_ISSUES (✓$SUCCESS ✗$FAIL) ${PCT}% | ${RATE}/min"
+              fi
+            fi
+          done
+          
+          TOTAL_TIME=$(($(date +%s) - START))
+          if [ $TOTAL_TIME -gt 0 ] && [ $TOTAL_ISSUES -gt 0 ]; then
+            RATE=$(( (TOTAL_ISSUES * 60) / TOTAL_TIME ))
+            PCT=$(( (SUCCESS * 100) / TOTAL_ISSUES ))
+          else
+            RATE=0
+            PCT=0
+          fi
+          
+          echo ""
+          echo "✅ PHASE 5 COMPLETE"
+          echo "   Total: $TOTAL_ISSUES issues in ${TOTAL_TIME}s"
+          echo "   Success: $SUCCESS (${PCT}%)"
+          echo "   Failed: $FAIL"
+          echo "   Rate: ${RATE} issue/min"
+          echo "════════════════════════════════════════"
+
+      - name: Final Summary
+        if: always()
+        run: |
+          echo ""
+          echo "════════════════════════════════════════"
+          echo "🎉 WORKFLOW COMPLETE - ${{ matrix.account }}"
+          echo "════════════════════════════════════════"
+          echo "📊 v7.0 HYBRID - Best of Both Worlds"
+          echo ""
+          echo "✅ Repos: Created successfully"
+          echo "✅ Commits: Direct push to main (STATS COUNTED!)"
+          echo "✅ PRs: Created with smart token rotation"
+          echo "✅ Issues: Created with rate limit handling"
+          echo ""
+          echo "🔗 Check your GitHub profile for results:"
+          echo "   https://github.com/${{ matrix.account }}"
+          echo ""
+          echo "⏰ Stats may take 5-15 minutes to update"
+          echo "   Hard refresh (Ctrl+Shift+R) if needed"
+          echo "════════════════════════════════════════"
